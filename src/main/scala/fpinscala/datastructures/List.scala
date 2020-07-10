@@ -1,6 +1,5 @@
 package fpinscala.datastructures
 
-import scala.Option
 import scala.annotation.tailrec
 
 sealed trait List[+A]
@@ -118,9 +117,9 @@ object List {
 
   def addMatchingElements2(l1: List[Int], l2: List[Int]): List[Int] = List.zipWith(l1, l2)(_+_)
 
-  def head[A](as: List[A]): Option[A] = as match {
-    case Nil => None
-    case Cons(h, _) => Some(h)
+  def head[A](as: List[A]): scala.Option[A] = as match {
+    case Nil => scala.None
+    case Cons(h, _) => scala.Some(h)
   }
 
   // 3.24 Checks whether sub is a sublist of sup
@@ -130,13 +129,13 @@ object List {
     def firstMatched(sup: List[A], sub: List[A]): Boolean = sup match {
       case Nil => sub == Nil
       case Cons(_, _) if sub == Nil => true
-      case Cons(h, _) if Option(h) != head(sub) => false
+      case Cons(h, _) if scala.Option(h) != head(sub) => false
       case Cons(_, tail) => firstMatched(tail, drop(sub, 1))
     }
 
     sup match {
       case Nil => Nil == sub
-      case Cons(h, tail) if Option(h) == List.head(sub) => firstMatched(tail, drop(sub, 1))
+      case Cons(h, tail) if scala.Option(h) == List.head(sub) => firstMatched(tail, drop(sub, 1))
       case Cons(_, tail) => hasSubsequence(tail, sub)
     }
   }
