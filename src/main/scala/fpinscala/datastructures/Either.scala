@@ -1,4 +1,6 @@
-package fpinscala.datastructures
+package fpinscala.errorhandling
+
+import fpinscala.datastructures._
 
 import scala.annotation.tailrec
 
