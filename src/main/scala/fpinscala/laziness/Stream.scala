@@ -1,5 +1,8 @@
 package fpinscala.laziness
 
+import fpinscala.errorhandling._
+import fpinscala.laziness.Stream.{cons, empty}
+
 import scala.annotation.tailrec
 
 sealed trait Stream[+A] {
@@ -23,7 +26,7 @@ sealed trait Stream[+A] {
       else
       as match {
       case Empty => acc.reverse
-      case Cons(h, tail) => go(tail(), Stream.cons(h(), acc), n - 1)
+      case Cons(h, tail) => go(tail(), cons(h(), acc), n - 1)
     }
 
     go(this, Empty, n)
@@ -54,11 +57,37 @@ sealed trait Stream[+A] {
         as match {
           case Empty => acc.reverse
           case Cons(h, _) if !f(h()) => acc.reverse
-          case Cons(h, tail) => go(tail(), Stream.cons(h(), acc), f)
+          case Cons(h, tail) => go(tail(), cons(h(), acc), f)
         }
 
     go(this, Empty, f)
+
   }
+
+  def foldRight[B](z: => B)(f: (A, => B) => B): B = this match {
+    case Empty => z
+    case Cons(h, tail) => f(h(), tail().foldRight(z)(f))
+  }
+
+  def exists(f: A => Boolean): Boolean = this.foldRight(false)((a, b) => f(a) || b)
+
+  // 5.4 implement forAll
+  def forAll(f: A => Boolean): Boolean = this.foldRight(true)((a, b) => f(a) && b)
+
+  // 5.5 takewhile using foldRight
+  def takeWhileFR(f: A => Boolean): Stream[A] = this.foldRight(empty: Stream[A])((a, b) => if (f(a)) cons(a, b) else b)
+
+  // 5.6 implement headOption
+  def headOption: Option[A] = this.foldRight(None: Option[A])((a, _) => Some(a))
+
+  // 5.7 implement map, filter, append, and flatMap using foldRight
+  def map[B](f: A => B): Stream[B] = this.foldRight(Empty: Stream[B])((a, b) => cons(f(a), b))
+
+  def filter(f: A => Boolean): Stream[A] = this.foldRight(Empty: Stream[A])((a, b) => if (f(a)) cons(a, b) else b)
+
+  def append[B >: A](append: => Stream[B]): Stream[B] = this.foldRight(append)((a, b) => cons(a, b))
+
+  def flatMap[B](f: A => Stream[B]): Stream[B] = this.foldRight(Empty: Stream[B])((a, b) => f(a).append(b))
 }
 case class Cons[+A](h: () => A, tail: () => Stream[A]) extends Stream[A]
 case object Empty extends Stream[Nothing]
