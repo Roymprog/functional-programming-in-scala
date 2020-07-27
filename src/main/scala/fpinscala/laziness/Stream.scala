@@ -114,6 +114,33 @@ sealed trait Stream[+A] {
     case (Empty, _) => None
     case (Cons(a, tail1), Cons(b, tail2)) => Some((a(), b()), (tail1(), tail2()))
   }
+
+  def zipAll[B](s: Stream[B]): Stream[(Option[A], Option[B])] = unfold((this, s)){
+    case (_, Empty) => None
+    case (Empty, _) => None
+    case (Cons(a, tail1), Cons(b, tail2)) => Some((Some(a()), Some(b())), (tail1(), tail2()))
+  }
+
+  // 5.15 implement tails
+  def tails: Stream[Stream[A]] = unfold(this){
+    case Empty => None
+    case Cons(h, tail) => Some(Cons(h, tail), tail())
+  }
+
+  // 5.14 define startsWith(prefixOf)
+  def prefixOf[B >: A](s: Stream[B]): Boolean = this.zipAll(s).takeWhile(!_._2.isEmpty).forAll{
+    case (h1, h2) => h1 == h2
+  }
+
+  // 5.13 define hasSubsequence using unfold
+  def hasSubsequence[B](s: Stream[B]): Boolean = this.tails.exists(s.prefixOf(_))
+
+  // 5.16 define scanRight returning a stream of intermediate results
+  def scanRight[B](b: B)(f: (A, => B) => B): Stream[B] = foldRight((b, Stream(b)))((a, p0) => {
+    lazy val p1 = p0
+    val b2 = f(a, p1._1)
+    (b2, cons(b2, p1._2))
+  })._2
 }
 
 case class Cons[+A](h: () => A, tail: () => Stream[A]) extends Stream[A]
