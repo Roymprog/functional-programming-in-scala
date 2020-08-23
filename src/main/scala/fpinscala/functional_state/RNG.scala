@@ -2,14 +2,11 @@ package fpinscala.functional_state
 
 import fpinscala.functional_state.RNG.Rand
 
+import scala.annotation.tailrec
 
 trait RNG {
 
   def nextInt: (Int, RNG)
-
-  val int: Rand[Int] = _.nextInt
-
-  def unit[A](a: A): Rand[A] = rng => (a, rng)
 
 }
 
@@ -24,7 +21,8 @@ case class SimpleRNG(seed: Long) extends RNG {
 }
 
 object RNG {
-  type Rand[+A] = RNG => (A, RNG)
+  import State._
+  type Rand[A] = State[RNG, A]
 
   // 6.1 define a function that always returns a positive integer
   def nonNegativeInt(rng: RNG): (Int, RNG) = {
@@ -33,7 +31,7 @@ object RNG {
     (int, nextRNG)
   }
 
-  def map[A, B](s :Rand[A])(f: A => B): Rand[B] = rng => {
+  def map[S, A, B](s :S => (A, S))(f: A => B): S => (B, S) = rng => {
     val (a, nextRng) = s(rng)
     (f(a), nextRng)
   }
@@ -48,6 +46,8 @@ object RNG {
   }
 
   def int(rng: RNG): (Int, RNG) = rng.nextInt
+
+  def unit[A](a: A): Rand[A] = (rng: RNG) => (a, rng)
 
   // 6.3 define functions returning (Int,Double), (Double, Int) and (Double, Double, Double)
   def intDouble(rng: RNG): ((Int, Double), RNG) = {
@@ -68,8 +68,9 @@ object RNG {
     ((d1, d2, d3), rng4)
   }
 
-  // 6.4 Define a fucntion to generate a list of random ints
+  // 6.4 Define a function to generate a list of random ints
   def ints(count: Int)(rng: RNG): (List[Int], RNG) = {
+    @tailrec
     def ints(count: Int)(rng: RNG)(acc: List[Int]): (List[Int], RNG) = {
       if (count == 0) (acc, rng)
       else {
@@ -103,7 +104,7 @@ object RNG {
 
   // 6.7 Reimplement ints with sequence
   def intsSequence(count: Int)(rng: RNG): (List[Int], RNG) =
-    sequence(List.fill(count)(rng.int))(rng)
+    sequence(List.fill(count)(int _))(rng)
 
   // 6.8 Define flatMap
   def flatMap[A, B](f: Rand[A])(g: A => Rand[B]): Rand[B] = rng => {
