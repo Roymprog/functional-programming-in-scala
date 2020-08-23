@@ -1,8 +1,18 @@
 package fpinscala.functional_state
 
+import fpinscala.functional_state.RNG.Rand
+
+
 trait RNG {
+
   def nextInt: (Int, RNG)
+
+  val int: Rand[Int] = _.nextInt
+
+  def unit[A](a: A): Rand[A] = rng => (a, rng)
+
 }
+
 
 case class SimpleRNG(seed: Long) extends RNG {
   def nextInt: (Int, RNG) = {
@@ -14,12 +24,21 @@ case class SimpleRNG(seed: Long) extends RNG {
 }
 
 object RNG {
+  type Rand[+A] = RNG => (A, RNG)
+
   // 6.1 define a function that always returns a positive integer
-  def nonNegativeInt(rng:RNG): (Int, RNG) = {
+  def nonNegativeInt(rng: RNG): (Int, RNG) = {
     val (signedInt, nextRNG) = rng.nextInt
     val int: Int = if (signedInt == Int.MinValue) 0 else signedInt.abs
     (int, nextRNG)
   }
+
+  def map[A, B](s :Rand[A])(f: A => B): Rand[B] = rng => {
+    val (a, nextRng) = s(rng)
+    (f(a), nextRng)
+  }
+
+  def nonNegativeEven: Rand[Int] = map(nonNegativeInt)(i => i - i %2)
 
   //6.2 define a function that returns a Double between 0 and 1(exclusive)
   def double(rng: RNG): (Double, RNG) = {
@@ -28,5 +47,91 @@ object RNG {
     (double, nextRNG)
   }
 
+  def int(rng: RNG): (Int, RNG) = rng.nextInt
+
   // 6.3 define functions returning (Int,Double), (Double, Int) and (Double, Double, Double)
+  def intDouble(rng: RNG): ((Int, Double), RNG) = {
+    val (i, rng2) = rng.nextInt
+    val (d, nextRNG) = double(rng2)
+    ((i, d), nextRNG)
+  }
+
+  def doubleInt(rng: RNG): ((Double, Int), RNG) = {
+    val ((i, d), nextRNG) = intDouble(rng)
+    ((d, i), nextRNG)
+  }
+
+  def double3(rng: RNG): ((Double, Double, Double), RNG) = {
+    val (d1, rng2) = double(rng)
+    val (d2, rng3) = double(rng2)
+    val (d3, rng4) = double(rng3)
+    ((d1, d2, d3), rng4)
+  }
+
+  // 6.4 Define a fucntion to generate a list of random ints
+  def ints(count: Int)(rng: RNG): (List[Int], RNG) = {
+    def ints(count: Int)(rng: RNG)(acc: List[Int]): (List[Int], RNG) = {
+      if (count == 0) (acc, rng)
+      else {
+        val (i, nextRNG) = rng.nextInt
+        ints(count - 1)(nextRNG)(i :: acc)
+      }
+    }
+    ints(count)(rng)(List.empty)
+  }
+
+  // 6.5 Implement double in a more elegant way using Rand
+  def elegantDouble: Rand[Double] = map(nonNegativeInt)(i => i / (Int.MaxValue.toDouble + 1))
+
+  // 6.6 Write a map2 function that combines 2 RNG actions
+  def map2[A, B, C](ra: Rand[A], rb: Rand[B])(f: (A, B) => C): Rand[C] = rng => {
+    val (a, rng1) = ra(rng)
+    val (b, rng2) = rb(rng1)
+    (f(a, b), rng2)
+  }
+
+  def both[A, B](ra: Rand[A], rb: Rand[B]): Rand[(A,B)] =
+    map2(ra, rb)((_, _))
+
+  def randIntDouble: Rand[(Int, Double)] = both(int, double)
+
+  def randDoubleInt: Rand[(Double, Int)] = both(double, int)
+
+  // 6.7 Define a function to combine a list of rng transitions
+  def sequence[A](rands: List[Rand[A]]): Rand[List[A]] =
+    rands.foldLeft((rng :RNG) => (List.empty: List[A], rng))(map2(_, _)((a, b) => a :+ b))
+
+  // 6.7 Reimplement ints with sequence
+  def intsSequence(count: Int)(rng: RNG): (List[Int], RNG) =
+    sequence(List.fill(count)(rng.int))(rng)
+
+  // 6.8 Define flatMap
+  def flatMap[A, B](f: Rand[A])(g: A => Rand[B]): Rand[B] = rng => {
+    val (a, nextRNG) = f(rng)
+    g(a)(nextRNG)
+  }
+
+  def nonNegativeLessThan(n: Int): Rand[Int] = flatMap(nonNegativeInt)(i => {
+    val mod = i % n
+    if (i + (n-1) - mod >= 0) (rng :RNG) => (mod, rng) else nonNegativeLessThan(n)
+  })
+
+  // 6.9 Define map and map2 using flatMap
+  def mapByFlatMap[A, B](s: Rand[A])(f: A => B): Rand[B] = {
+    val g = (a: A) => (rng: RNG) => (f(a), rng)
+    flatMap(s)(g)
+  }
+
+  def map2ByFlatMap[A, B, C](ra: Rand[A], rb: Rand[B])(f: (A, B) => C): Rand[C] = {
+    val s: Rand[(A, B)] = (rng: RNG) => ((ra(rng)._1, rb(ra(rng)._2)._1 ), rb(ra(rng)._2)._2)
+    val g: ((A, B)) => Rand[C] = t => (rng: RNG) => (f(t._1, t._2), rng)
+    flatMap(s)(g)
+  }
+
+  def bothByFlatMap[A, B](ra: Rand[A], rb: Rand[B]): Rand[(A,B)] =
+    map2ByFlatMap(ra, rb)((_, _))
+
+  def randIntDoubleByFlatMap: Rand[(Int, Double)] = bothByFlatMap(int, double)
+
+  def randDoubleIntByFlatMap: Rand[(Double, Int)] = bothByFlatMap(double, int)
 }
