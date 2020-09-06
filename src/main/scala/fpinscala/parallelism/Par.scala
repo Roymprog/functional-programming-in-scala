@@ -2,10 +2,9 @@ package fpinscala.parallelism
 
 import java.util.concurrent.{ExecutorService, Future, TimeUnit}
 
-import scala.::
-
 
 object Par {
+
   type Par[A] = ExecutorService => Future[A]
 
   private case class UnitFuture[A](get: A) extends Future[A] {
@@ -27,12 +26,7 @@ object Par {
   def run[A](s: ExecutorService)(a: Par[A]): Future[A] = a(s)
 
   def sum(ints: IndexedSeq[Int]): Par[Int] = {
-    if (ints.size <= 1)
-      Par.unit(ints.headOption.getOrElse(0))
-    else {
-      val (l, r) = ints.splitAt(ints.length/2)
-      Par.map2(Par.fork(sum(l)), Par.fork(sum(r)))(_ + _)
-    }
+    reduce(ints, 0)(_ + _)
   }
 
   // 7.1 Define generic map2 function combining two Pars
@@ -84,5 +78,18 @@ object Par {
   def parFilter[A](ps: List[A])(f: A => Boolean): Par[List[A]] = fork {
     val psals = parMap(ps)((a: A) => if (f(a)) List(a) else List.empty)
     map(psals)(_.flatten)
+  }
+
+  def reduce[A](as: Seq[A], unit: A)(combine: (A, A) => A): Par[A] = {
+    def go(as: Seq[A]): Par[A] = {
+      if (as.size <= 1)
+        Par.unit(as.headOption.getOrElse(unit))
+      else {
+        val (l, r) = as.splitAt(as.length/2)
+        Par.map2(Par.fork(go(l)), Par.fork(go(r)))(combine(_, _))
+      }
+    }
+
+    go(as)
   }
 }
