@@ -73,6 +73,8 @@ object NonBlockingPar {
     sequence(pfas)
   }
 
+  // In order to implement choiceN I had already identified I required a function
+  // with the functionality flatMapping provides
   def flatMap[A, B](pa: Par[A])(f: A => Par[B]): Par[B] = es => {
     new Future[B] {
       def apply(cb: B => Unit): Unit = f(run(es)(pa))(es)(cb)
@@ -80,10 +82,36 @@ object NonBlockingPar {
   }
 
   // 7.11 Define a function choiceN to select a Par based on the result of a Par[Int}
-  def choiceN[A](n: Par[Int])(choices: List[Par[A]]): Par[A] = {
+  def choiceN[A](n: Par[Int])(choices: List[Par[A]]): Par[A] =
     flatMap(n)(n => choices(n))
-  }
 
   def choice[A](bool: Par[Boolean])(t: Par[A], f: Par[A]): Par[A] =
     choiceN(map(bool)(b => if (b) 0 else 1))(List(t, f))
+
+  // 7.12 Define choiceN using a Map instead of a list
+  def choiceNMap[K,V](k: Par[K])(choices: Map[K, Par[V]]): Par[V] =
+    flatMap(k)(k => choices(k))
+
+  def chooser[A,B](pa: Par[A])(choices: A => Par[B]): Par[B] = {
+    flatMap(pa)(choices)
+  }
+
+  def choiceChooser[A](n: Par[Boolean])(t: Par[A], f: Par[A]) =
+    chooser(n)(if (_) t else f)
+
+  def choiceNChooser[A](n: Par[Int])(choices: List[Par[A]]) =
+    chooser(n)(choices(_))
+
+  def choiceMapChooser[K,V](n: Par[K])(choices: Map[K,Par[V]]) =
+    chooser(n)(choices(_))
+
+  // 7.13 Define a function that runs the inner computation and returns
+  // 7.14 a) My initial implementation of join was with flatMap
+  def join[A](ppa: Par[Par[A]]): Par[A] =
+    flatMap(ppa)(pa => pa)
+
+  // 7.14 b) Implement flatMap with join
+  def flatMapByJoin[A,B](pa: Par[A])(f: A => Par[B]): Par[B] =
+    join(map(pa)(f))
+
 }
