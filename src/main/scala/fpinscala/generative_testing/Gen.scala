@@ -11,13 +11,14 @@ object Gen {
 
   def boolean: Gen[Boolean] = Gen(State(RNG.map((rng: RNG) => nonNegativeInt(rng))(i => i % 2 == 1)))
 
-  def listOf[A](a: Gen[A]): Gen[List[A]] = ???
+  // Use a list of 100 elements as default
+  def listOf[A](a: Gen[A]): Gen[List[A]] = listOfN(100, a)
 
   def listOfN[A](n: Int, a: Gen[A]): Gen[List[A]] = {
-    val list: List[State.State[RNG, A]] =
-      (0 to n).map(_ => (rng: RNG) => a.sample.run(rng)).toList
-    val randlist: State.State[RNG, List[A]] = sequence(list)
-    Gen(State((rng: RNG) => randlist(rng)))
+    val list: List[State[RNG, A]] =
+      (0 to n).map(_ => State(a.sample.run(_))).toList
+    val randlist: State[RNG, List[A]] = sequence(list)
+    Gen(State((rng: RNG) => randlist.run(rng)))
   }
 
   def forAll[A](gen: Gen[A])(pred: A => Boolean): Prop = ???
