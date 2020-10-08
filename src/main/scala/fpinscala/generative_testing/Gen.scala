@@ -5,7 +5,7 @@ import fpinscala.functional_state.RNG.{double, nonNegativeInt}
 import fpinscala.functional_state.State.sequence
 import fpinscala.functional_state.{RNG, SimpleRNG, State}
 import fpinscala.generative_testing.Gen.buildMessage
-import fpinscala.generative_testing.Prop.{MaxSize, Passed, Result, TestCases, forAll}
+import fpinscala.generative_testing.Prop.{MaxSize, Passed, Proved, Result, TestCases, forAll}
 import fpinscala.laziness._
 
 import scala.util.Try
@@ -153,7 +153,7 @@ case class SGen[A](n: Int => Gen[A]) {
 case class Prop(run: (MaxSize, TestCases, RNG) => Result) {
   def &&(prop: Prop): Prop = Prop{
     (m, t, rng ) => run(m, t, rng) match {
-      case Passed => prop.run(m, t, rng)
+      case Passed | Proved => prop.run(m, t, rng)
       case f => f
     }
   }
@@ -194,6 +194,14 @@ object Prop {
     def isFalsified: Boolean = true
   }
 
+  case object Proved extends Result {
+    override def isFalsified: Boolean = false
+  }
+
+  def check(p: => Boolean): Prop = Prop {(_,_,_) =>
+    if (p) Proved else Falsified("()", 0)
+  }
+
   def forAll[A](gen: Gen[A])(pred: A => Boolean): Prop =
     Prop{
       (_, t, rng) =>
@@ -203,7 +211,7 @@ object Prop {
           .map {
             case (a, i) => Try(
               if (pred(a)) Passed else Falsified(a.toString, i)
-            ).fold(e => Falsified(buildMessage(a, e), i), s => s)
+            ).fold(e => Falsified(buildMessage(a, e), i), identity)
           }
           .toList
           .find(_.isFalsified).getOrElse(Passed)
@@ -218,7 +226,7 @@ object Prop {
       val props: Stream[Prop] =
         Stream.from(0).take((n min max) + 1).map(i => forAll(g(i))(f))
       val prop: Prop =
-        props.map(p => Prop { (max, _, rng) =>
+        props.map(p => Prop { (_, _, _) =>
           p.run(max, casesPerSize, rng)
         }).toList.reduce(_ && _)
       prop.run(max,n,rng)
@@ -238,6 +246,8 @@ object Prop {
         println(s"! Falsified after $n passed tests:\n $msg")
       case Passed =>
         println(s"+ OK, passed $testCases tests.")
+      case Proved =>
+        println(s"+ OK, proved property.")
     }
   }
 }
