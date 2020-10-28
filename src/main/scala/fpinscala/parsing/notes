@@ -1,0 +1,60 @@
+Laws for the Parser algebra:
+
+// Char
+run(char(c))(c.toString) == Right(c)
+
+// String
+run(string(s))(s) == Right(s)
+
+// or (|)
+// | is a commutative operator thus. Note: This might have impact on the way the return
+// value is or has to be reported
+or(string(s1), string(s2)) == or(string(s2), string(s1))
+run(or(string(s1), string(s2))) == run(or(string(s2), string(s1)))
+or(string(s), string(s)) == string(s)
+// The below rule follows from the fact that I defined 'or' to be commutative. It does
+not matter whether which of the components is parsed first
+or(or(string(s1), string(s2)), string(s3)) == or(string(s1), or(string(s2), string(s3)))
+run(or(string(s1), string(s2)))(s1) == Right(s1)
+run(or(string(s1), string(s2)))(s2) == Right(s2)
+
+// listOfN
+run(listOfN(3, s1 | s2))(s1+s1+s2) == Right(s1+s1+s2)
+run(listOfN(3, s1 | s2))(s2+s1+s1) == Right(s2+s1+s1)
+run(listOfN(3, s1 | s2))(s1+s1+s1) == Right(s1+s1+s1)
+
+// and (&)
+and(string(s1), string(s2)) == string(s1 + s2)
+run(and(string("s1"), string("s2")))("") == Left(ParseError)
+run(and(string(s1), string(s2)))(s1) == Left(ParseError)
+run(and(string(s1), string(s2)))(s2) == Left(ParseError)
+
+// repeat (*) / repeat1 (+) repeat1 should be implemented using repeat, as it's a special case of repeat
+run(repeat('a')("") == Right(0))
+run(repeat('a')("a") == Right(1)
+run(repeat('a')("aaaaa") == Right(5)
+
+run(repeat1('a')("") == Left(ParseError)
+run(repeat1('a')("a") == Right(1)
+run(repeat1('a')("aaaaa") == Right(5)
+
+
+// repeatTuple
+run(repeatTuple('a', 'b')("bbb") == Right((0,3)
+run(repeatTuple('a', 'b')("aaaab") == Right((4,1)
+run(repeatTuple('a', 'b')("qre") == Right((0,0)
+
+Error reporting in running repeat1 would have to be implemented by throwing exceptions to exit execution,
+and jump to returning a ParseError when not at least 1 is found.
+Could the API support giving an explicit error message like "Expected one or more 'a" in case of failure?
+- We would require a way to extract the textual representation of a Parser[A], to in this case convert
+the Parser[Char] -> 'a' for error reporting.
+- We would require a way to catch exceptional cases when running a Parser. This could be done by throwing
+an Exception for example, then running a Parser would have to catch (all) Exceptions.
+
+// map is a function that retains the result of running a Parser. A failing parser still fails, a successful one succeeds
+// The result of a successful parser is transformed by a function A => B
+map(p)(a => a) == p
+
+// slice, parses a string and returns the portion of the string it matches
+run(slice(many(or('a','b'))))("aaabb") == Right("aaabb")

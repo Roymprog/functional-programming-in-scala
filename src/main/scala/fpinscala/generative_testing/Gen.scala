@@ -2,10 +2,9 @@ package fpinscala.generative_testing
 
 import fpinscala.errorhandling._
 import fpinscala.functional_state.RNG.{double, nonNegativeInt}
-import fpinscala.functional_state.State.sequence
 import fpinscala.functional_state.{RNG, SimpleRNG, State}
 import fpinscala.generative_testing.Gen.buildMessage
-import fpinscala.generative_testing.Prop.{MaxSize, Passed, Proved, Result, TestCases, forAll}
+import fpinscala.generative_testing.Prop._
 import fpinscala.laziness._
 
 import scala.util.Try
