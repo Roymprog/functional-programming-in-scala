@@ -81,7 +81,7 @@ object NonBlockingPar {
     }
   }
 
-  // 7.11 Define a function choiceN to select a Par based on the result of a Par[Int}
+  // 7.11 Define a function choiceN to select a Par based on the result of a Par[Int]
   def choiceN[A](n: Par[Int])(choices: List[Par[A]]): Par[A] =
     flatMap(n)(n => choices(n))
 

@@ -58,3 +58,14 @@ map(p)(a => a) == p
 
 // slice, parses a string and returns the portion of the string it matches
 run(slice(many(or('a','b'))))("aaabb") == Right("aaabb")
+
+// product is associative
+run(product(string(s1), product(string(s2), string(s3)))(s) == run(product(product(string(s1), string(s2)), string(s3)))(s)
+// The order of mapping and product doesn't matter for the result of the parser
+run(map(product(string(s1), string(s2)))(f))(s) == run(product(map(string(s1)(f)), map(string(s2))(f)))(s)
+
+// 9.5 Dealing with non-strictness can also be done by introducing an combinator like "fork" that returns
+a non-strict parser by providing it a Parser.
+In the case of product we assume that the first parser succeeds, if the first does not succeed, it will fail
+and the second parser will not be evaluated. From this perspective it only makes sense to make the second
+parser non-strict. The API defines product as the primitive, hence map2 will automatically use the same.
