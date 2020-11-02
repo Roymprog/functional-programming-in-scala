@@ -52,6 +52,8 @@ trait Parsers[ParseError, Parser[+_]] { self =>
     product(p1, p2).map(f.tupled)
   def map3[A,B,C,D](p1: Parser[A], p2: Parser[B], p3: Parser[C])(f: (A, B, C) => D): Parser[D] =
     unbiasLeft(product(product(p1, p2), p3)).map(f.tupled)
+  def wrap[A,B,C](prefix: Parser[A], suffix: Parser[C])(p: Parser[B]): Parser[B] =
+    map3(prefix, p, suffix)((_, p, _) =>  p)
   def or[A](p1: Parser[A], p2: => Parser[A]): Parser[A]
 
   val numA: Parser[Int] = char('a').many.slice.map(_.length)
@@ -77,11 +79,11 @@ trait Parsers[ParseError, Parser[+_]] { self =>
     integer or double
   def expNumber: Parser[String] =
     expInteger or expDouble
-  // Number does not support negative numbers yet
+  def signed: Parser[String] =
+    regex("""[-+]?""".r)
   def number: Parser[String] =
-    plainNumber or expNumber
-
-  def ignoreWhiteSpace[A](p1: Parser[A]): Parser[A] = map3(whitespace, p1, whitespace)((_, a, _) => a)
+    map2(signed, plainNumber)(_+_) or map2(signed,plainNumber)(_+_)
+  def ignoreWhiteSpace[A](p1: Parser[A]): Parser[A] = wrap(whitespace, whitespace)(p1)
 
   implicit def string(s: String): Parser[String]
   implicit def regex(r: Regex): Parser[String]
@@ -127,6 +129,10 @@ object Parsers {
     val openBracket = ignoreWhiteSpace(string("["))
     val closeBracket = ignoreWhiteSpace(string("]"))
     val comma = ignoreWhiteSpace(string(","))
+    def arr[A](p: Parser[A]) =
+      wrap(openBracket, closeBracket)(p)
+    def obj[A](p: Parser[A]) =
+      wrap(openBrace, closeBrace)(p)
     def boolean: Parser[JBool] = string("true").map(_ => JBool(true)) or string("false").map(_ => JBool(false))
     def nill: Parser[JNull.type] = string("null").map(_ => JNull)
     def value: Parser[JSON] =
@@ -138,19 +144,21 @@ object Parsers {
     def element: Parser[JSON] =
       ignoreWhiteSpace(value)
     def elements: Parser[JArray] =
+      element.map(json => JArray(List(json))) or
       map2(element, map2(comma, elements)((_, j) => j))((a,l) => JArray(a :: l.get))
     def jarray: Parser[JArray] =
-      product(openBracket, closeBracket).map(_ => JArray(List.empty)) or
-        map3(openBracket, elements, closeBracket)((_, l, _) => l)
+      map2(openBracket, closeBracket)((_, _) => JArray(List.empty)) or
+        arr(elements)
     def member: Parser[(String, JSON)] =
       map3(ignoreWhiteSpace(stringLiteral), string(":"), element)((a, _, c) => (a.get, c))
     def members: Parser[JObject] =
+      member.map(t => JObject(Map(t))) or
       member.map2(comma.map2(members)((_, j) => j))((a,l) => JObject(l.get + a))
     def jobject: Parser[JSON] =
-      map3(openBrace, ignoreWhiteSpace(string("")), closeBrace)((_, b, _) => b).map(_ => JObject(Map.empty)) or
-      map3(openBrace, members, closeBrace)((_, b, _) => b)
+      obj(string("")).map(_ => JObject(Map.empty)) or
+      obj(members)
 
-    ignoreWhiteSpace(value)
+    element
   }
 
   sealed trait JSON
