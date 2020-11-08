@@ -69,3 +69,19 @@ a non-strict parser by providing it a Parser.
 In the case of product we assume that the first parser succeeds, if the first does not succeed, it will fail
 and the second parser will not be evaluated. From this perspective it only makes sense to make the second
 parser non-strict. The API defines product as the primitive, hence map2 will automatically use the same.
+
+// 9.10 a.
+Given parser "abra".**(" ".many).**("cadabra") and input "abra cAdabra" I would like to report
+an error message like: "Error parsing 'cadabra', error occured on input: 'abra cAdabra'"
+                                                                                ^
+The above requires to store the location of while parsing, so the error location can be highlighted.
+// 9.10 b.
+Given parser "a or b" it does not make sense to run the second parser if the first parser fails
+on parsing a particular type. Parser a and Parser b have the same type, so the second would also fail.
+// 9.10 c.
+The location of error can be reported by keeping an integer index when running a Parser. The parser
+run method could internally keep the index.
+Or we could keep the parsed part of the string as part of the parser. parser.slice should return
+the parsed input of a parser. The string passed to run is only the remaining part of what needs
+to be parsed. Knowing the parser, what is parsed, and what needs to be parsed is enough to
+report the location of an error.
