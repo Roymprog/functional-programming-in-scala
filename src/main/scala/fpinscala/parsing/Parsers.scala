@@ -69,7 +69,7 @@ trait Parsers[Parser[+_]] {
 
   // 9.1 Define a method map2 using product to combine two parsers
   def map2[A, B, C](p1: Parser[A], p2: Parser[B])(f: (A, B) => C): Parser[C] =
-    product(p1, p2).map(f.tupled)
+    for {a <- p1; b <- p2} yield f(a, b)
 
   def map3[A, B, C, D](p1: Parser[A], p2: Parser[B], p3: Parser[C])(f: (A, B, C) => D): Parser[D] =
     unbiasLeft(product(product(p1, p2), p3)).map(f.tupled)
@@ -77,18 +77,18 @@ trait Parsers[Parser[+_]] {
   def wrap[A, B, C](prefix: Parser[A], suffix: Parser[C])(p: Parser[B]): Parser[B] =
     map3(prefix, p, suffix)((_, p, _) => p)
 
-  val numA: Parser[Int] = char('a').many.slice.map(_.length)
-  val numAsBs: Parser[(Int, Int)] =
-    char('a').many.slice.map(_.length) **
-      char('b').many1.slice.map(_.length)
-  // 9.6 Use flatMap to write a context-sensensitive parser that can parse a number, n, followed
-  // by n times the character for example "0" and "4aaaa"
-  val nNumAs: Parser[String] =
-  digit
-    .flatMap(n => listOfN(char('a'), n.toInt))
-    .map(_.mkString)
+//  val numA: Parser[Int] = char('a').many.slice.map(_.length)
+//  val numAsBs: Parser[(Int, Int)] =
+//    char('a').many.slice.map(_.length) **
+//      char('b').many1.slice.map(_.length)
+//  // 9.6 Use flatMap to write a context-sensensitive parser that can parse a number, n, followed
+//  // by n times the character for example "0" and "4aaaa"
+//  val nNumAs: Parser[String] =
+//  digit
+//    .flatMap(n => listOfN(char('a'), n.toInt))
+//    .map(_.mkString)
 
-  def whitespace: Parser[String] = """\s""".r
+  def whitespace: Parser[String] = many(" ").slice
 
   def digit: Parser[String] = """\d""".r
 
@@ -166,17 +166,107 @@ trait Parsers[Parser[+_]] {
       equal(p1.map(f) ** p2.map(f), p1 ** p2 map { case (a, b) => (f(a), f(b)) })(in)
   }
 
-  case class Location(s: String, offSet: Int) {
-    lazy val line: Int = s.slice(0, offSet + 1).count(_ == '\n') + 1
+}
 
-    lazy val col: Int = s.slice(0, offSet + 1).lastIndexOf("\n") match {
-      case -1 => offSet + 1
-      case lastLineIndex => offSet - lastLineIndex
+// How do I know if a parser is committed on failure or not?
+// regex parser cannot return the amount of characters parsed.
+// How do I keep track of the offset when parsing?
+case class SimpleParser[+A](
+                            parse: String => Either[(Boolean, ParseError), (String, A)],
+                            offSet: Int = 0,
+                          )
+
+case class ParseError(stack: List[(Location, String)])
+
+object SimpleParsers extends Parsers[SimpleParser] {
+  override def slice[A](p: SimpleParser[A]): SimpleParser[String] =
+    SimpleParser(s => p.parse(s).map(t => (t._1, t._1)))
+
+  override def flatMap[A, B](p: SimpleParser[A])(f: A => SimpleParser[B]): SimpleParser[B] =
+    SimpleParser(s => {
+      p.parse(s).flatMap {
+        t => f(t._2)
+          .parse(s.slice(p.offSet + t._1.length, s.length))
+          .map(res => (s + res._1, res._2))
+      }
+    })
+
+  override def or[A](p1: SimpleParser[A], p2: => SimpleParser[A]): SimpleParser[A] =
+    SimpleParser(s => {
+      p1.parse(s) match {
+        case Left((committed, pe)) =>
+          if (committed) Left((committed, pe))
+          else p2.parse(s)
+        case Right(r) => Right(r)
+      }
+    })
+
+
+  override implicit def string(s: String): SimpleParser[String] =
+    SimpleParser((input: String) => {
+      val error = (index: Int) => ParseError(List((Location(input, index), s"Expected $s, but got $input")))
+
+      val zipped = input.zip(s)
+      if (zipped.length < input.length) Left((true, error(zipped.length)))
+      else zipped.indexWhere(chars => chars._1 != chars._2) match {
+        case -1 => Right((s,s))
+        case 0 => Left((false, error(0)))
+        case index => Left((true, error(index)))
+      }
+    })
+
+  override implicit def regex(r: Regex): SimpleParser[String] =
+    SimpleParser((input: String) => {
+      val error = ParseError(List((Location(input, 0), s"Expected match with regex ${r.toString()}, but got $input")))
+      r.findPrefixOf(input)
+        .map(s => Right((s, s)))
+        .getOrElse(Left((false, error)))
+    })
+
+  override def label[A](msg: String)(p: SimpleParser[A]): SimpleParser[A] =
+    SimpleParser(s => {
+      p.parse(s) match {
+        case Left((committed, ParseError((location, _) :: tail))) => Left((committed, ParseError((location, msg) :: tail)))
+        case Right(r) => Right(r)
+      }
+    }, p.offSet)
+
+  override def scope[A](msg: String)(p: SimpleParser[A]): SimpleParser[A] =
+    SimpleParser(s => {
+      p.parse(s) match {
+        case Left((committed, ParseError((location, err) :: tail))) => Left((committed, ParseError((location, msg) :: (location, err) :: tail)))
+        case Right(r) => Right(r)
+      }
+    }, p.offSet)
+
+  override def attempt[A](p: SimpleParser[A]): SimpleParser[A] =
+    SimpleParser(s => {
+      p.parse(s) match {
+        case Left((_, pe)) => Left((true, pe))
+        case Right(r) => Right(r)
+      }
+    })
+
+  override def run[A](p: SimpleParser[A])(input: String): Either[ParseError, A] =
+    p.parse(input) match {
+      case Left((_, pe)) => Left(pe)
+      case Right((s, a)) =>
+        if (a == input) Left(ParseError(List((Location(input, s.length), "Could not parse entire input"))))
+        else Right(a)
     }
+
+  override def errorMessage(p: ParseError): String = p.stack.head._2
+
+  override def errorLocation(p: ParseError): Location = p.stack.head._1
+}
+
+case class Location(s: String, offSet: Int) {
+  lazy val line: Int = s.slice(0, offSet + 1).count(_ == '\n') + 1
+
+  lazy val col: Int = s.slice(0, offSet + 1).lastIndexOf("\n") match {
+    case -1 => offSet + 1
+    case lastLineIndex => offSet - lastLineIndex
   }
-
-  case class ParseError(stack: List[(Location, String)])
-
 }
 
 object Parsers {
