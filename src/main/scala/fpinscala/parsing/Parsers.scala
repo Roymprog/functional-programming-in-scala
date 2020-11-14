@@ -55,7 +55,7 @@ trait Parsers[Parser[+_]] {
 
   // 9.8 Implement map using flatMap
   def map[A, B](p: Parser[A])(f: A => B): Parser[B] =
-    p.flatMap(a => succeed(f(a)))
+    p.flatMap(f andThen succeed)
 
   // Combines two parsers assuming the first is successful
   def product[A, B](p1: Parser[A], p2: => Parser[B]): Parser[(A, B)] =
@@ -77,18 +77,18 @@ trait Parsers[Parser[+_]] {
   def wrap[A, B, C](prefix: Parser[A], suffix: Parser[C])(p: Parser[B]): Parser[B] =
     map3(prefix, p, suffix)((_, p, _) => p)
 
-//  val numA: Parser[Int] = char('a').many.slice.map(_.length)
-//  val numAsBs: Parser[(Int, Int)] =
-//    char('a').many.slice.map(_.length) **
-//      char('b').many1.slice.map(_.length)
-//  // 9.6 Use flatMap to write a context-sensensitive parser that can parse a number, n, followed
-//  // by n times the character for example "0" and "4aaaa"
-//  val nNumAs: Parser[String] =
-//  digit
-//    .flatMap(n => listOfN(char('a'), n.toInt))
-//    .map(_.mkString)
+  lazy val numA: Parser[Int] = char('a').many.slice.map(_.length)
+  lazy val numAsBs: Parser[(Int, Int)] =
+    char('a').many.slice.map(_.length) **
+      char('b').many1.slice.map(_.length)
+  // 9.6 Use flatMap to write a context-sensensitive parser that can parse a number, n, followed
+  // by n times the character for example "0" and "4aaaa"
+  lazy val nNumAs: Parser[String] =
+  digit
+    .flatMap(n => listOfN(char('a'), n.toInt))
+    .map(_.mkString)
 
-  def whitespace: Parser[String] = many(" ").slice
+  def whitespace: Parser[String] = """\s*""".r
 
   def digit: Parser[String] = """\d""".r
 
@@ -184,11 +184,15 @@ object SimpleParsers extends Parsers[SimpleParser] {
 
   override def flatMap[A, B](p: SimpleParser[A])(f: A => SimpleParser[B]): SimpleParser[B] =
     SimpleParser(s => {
-      p.parse(s).flatMap {
-        t => f(t._2)
-          .parse(s.slice(p.offSet + t._1.length, s.length))
-          .map(res => (s + res._1, res._2))
-      }
+      for {
+        res1 <- p.parse(s)
+        res2 <- f(res1._2).parse(s.slice(p.offSet + res1._1.length, s.length))
+      } yield (res1._1 + res2._1, res2._2)
+//      p.parse(s).flatMap {
+//        t => f(t._2)
+//          .parse(s.slice(p.offSet + t._1.length, s.length))
+//          .map(res => (s + res._1, res._2))
+//      }
     })
 
   override def or[A](p1: SimpleParser[A], p2: => SimpleParser[A]): SimpleParser[A] =
