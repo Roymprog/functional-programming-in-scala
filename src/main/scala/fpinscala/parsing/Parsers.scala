@@ -31,8 +31,7 @@ trait Parsers[Parser[+_]] {
 
   def char(c: Char): Parser[Char] = string(c.toString) map (_.charAt(0))
 
-  def succeed[A](a: A): Parser[A] =
-    string("") map (_ => a)
+  def succeed[A](a: A): Parser[A]
 
   def run[A](p: Parser[A])(input: String): Either[ParseError, A]
 
@@ -168,7 +167,18 @@ trait Parsers[Parser[+_]] {
 
 }
 
-case class ParseError(stack: List[(Location, String)])
+case class ParseError(stack: List[(Location, String)] = List.empty) {
+  def push(msg: String, location: Location): ParseError =
+    copy((location, msg) :: stack)
+
+  def label(msg: String): ParseError =
+    ParseError(latestLoc.map((_, msg)).toList)
+
+  def latest: Option[(Location, String)] = stack.lastOption
+
+  def latestLoc: Option[Location] =
+    latest.map(_._1)
+}
 
 case class Location(s: String, offSet: Int) {
   lazy val line: Int = s.slice(0, offSet + 1).count(_ == '\n') + 1
@@ -180,6 +190,107 @@ case class Location(s: String, offSet: Int) {
 }
 
 object Parsers {
+  type MyParser[+A] = ParserState => ParserResult[A]
+
+  sealed trait ParserResult[+A]
+  final case class Success[+A](a: A, parsed: String) extends ParserResult[A]
+  final case class Failure(get: ParseError, isCommitted: Boolean = false) extends ParserResult[Nothing] {
+    def commit: Failure = Failure(get: ParseError, true)
+    def uncommit: Failure = Failure(get: ParseError)
+  }
+
+  sealed trait ParserState {
+    def input: String
+    def parsed: String
+    def offSet: Int
+    def moveParser(size: Int) : ParserState
+  }
+
+  final case class Parsable(s: String, offSet: Int = 0) extends ParserState {
+    override def input: String = s.substring(offSet)
+
+    override def moveParser(size: Int): ParserState = Parsable(s, offSet + size)
+
+    override def parsed: String = s.substring(0, offSet)
+  }
+
+  object MyParsers extends Parsers[MyParser] {
+    override def slice[A](p: MyParser[A]): MyParser[String] = state => p(state) match {
+      case Success(_, parsed) => Success(parsed, parsed)
+      case f: Failure => Failure(f.get, f.isCommitted)
+    }
+
+    override def flatMap[A, B](p: MyParser[A])(f: A => MyParser[B]): MyParser[B] = state => p(state) match {
+      case Success(a, parsed) =>
+        f(a)(state.moveParser(parsed.length)) match {
+          case Success(a2, parsed2) => Success(a2, parsed + parsed2)
+          case failure => failure
+        }
+      case failure: Failure => failure
+    }
+
+    override def or[A](p1: MyParser[A], p2: => MyParser[A]): MyParser[A] = state => p1(state) match {
+      case f: Failure =>
+        if (f.isCommitted) f.uncommit
+        else p2(state)
+      case success => success
+    }
+
+    override implicit def string(s: String): MyParser[String] = state => {
+      if (state.input.startsWith(s)) Success(s, s)
+      else Failure(ParseError().push(s"Expects $s, but got ${state.input}", Location(state.input, state.offSet)))
+    }
+
+    override implicit def regex(r: Regex): MyParser[String] = state => r.findPrefixOf(state.input) match {
+      case Some(s) => Success(s, s)
+      case None => Failure(ParseError().push(s"Expects ${r.toString()}, but got ${state.input}", Location(state.input, state.offSet)))
+    }
+
+    override def label[A](msg: String)(p: MyParser[A]): MyParser[A] = state => p(state) match {
+      case f: Failure => Failure(f.get.label(msg))
+      case success => success
+    }
+
+    override def scope[A](msg: String)(p: MyParser[A]): MyParser[A] = state => p(state) match {
+      case f: Failure => Failure(f.get.push(msg, f.get.latestLoc.get))
+      case success => success
+    }
+
+    override def attempt[A](p: MyParser[A]): MyParser[A] = state => p(state) match {
+      case f: Failure => f.commit
+      case success => success
+    }
+
+    override def run[A](p: MyParser[A])(input: String): Either[ParseError, A] =
+      p(Parsable(input)) match {
+        case Success(a, s) =>
+          if (s == input) Right(a)
+          else Left(ParseError().push(s"Could not parse entire input. Parsed:\n$s\n Input: $input", Location(input, s.length)))
+        case Failure(parseError, _) => Left(parseError)
+      }
+
+    override def errorMessage(p: ParseError): String = ???
+
+    override def errorLocation(p: ParseError): Location = ???
+
+    override def succeed[A](a: A): MyParser[A] = _ => Success(a, "")
+
+  /* From: https://github.com/fpinscala/fpinscala/blob/master/answers/src/main/scala/fpinscala/parsing/instances/Reference.scala#L134
+   */
+    override def many[A](p: MyParser[A]): MyParser[List[A]] =
+      s => {
+        val buf = new collection.mutable.ListBuffer[A]
+        def go(p: MyParser[A], parsed: String): ParserResult[List[A]] = {
+          p(s.moveParser(parsed.length)) match {
+            case Success(a, parsed2) => buf += a; go(p, parsed+parsed2)
+            case f@Failure(_, true) => f
+            case Failure(_, _) => Success(buf.toList,parsed)
+          }
+        }
+        go(p, "")
+      }
+  }
+
   def jsonParser[Parser[+_]](P: Parsers[Parser]): Parser[JSON] = {
     import P._
 
@@ -197,25 +308,29 @@ object Parsers {
     def value: Parser[JSON] =
       nill or boolean or stringLiteral or nr or jarray or jobject
     def stringLiteral: Parser[JString] =
-      map3(string("\""), """\w""".r, string("\""))((_, s, _) => JString(s))
+      map3(string("\""), """\w*""".r, string("\""))((_, s, _) => JString(s))
     def nr: Parser[JSON] =
       number.map(s => JNumber(s.toDouble))
     def element: Parser[JSON] =
       ignoreWhiteSpace(value)
     def elements: Parser[JArray] =
-      element.map(json => JArray(List(json))) or
-      map2(element, map2(comma, elements)((_, j) => j))((a,l) => JArray(a :: l.get))
+      map2(element, many(comma ** element))((json, a) => {
+        if (a.isEmpty) JArray(List(json))
+        else JArray(json :: a.map(_._2))
+      })
     def jarray: Parser[JArray] =
-      map2(openBracket, closeBracket)((_, _) => JArray(List.empty)) or
-        arr(elements)
+      arr(elements) or
+        map2(openBracket, closeBracket)((_, _) => JArray(List.empty))
     def member: Parser[(String, JSON)] =
       map3(ignoreWhiteSpace(stringLiteral), string(":"), element)((a, _, c) => (a.get, c))
     def members: Parser[JObject] =
-      member.map(t => JObject(Map(t))) or
-      member.map2(comma.map2(members)((_, j) => j))((a,l) => JObject(l.get + a))
+      map2(member, many(comma ** member))((json, a) => {
+        if (a.isEmpty) JObject(Map(json))
+        else JObject((json :: a.map(_._2)).toMap)
+      })
     def jobject: Parser[JSON] =
-      obj(string("")).map(_ => JObject(Map.empty)) or
-      obj(members)
+      obj(members) or
+        obj(string("")).map(_ => JObject(Map.empty))
 
     element
   }

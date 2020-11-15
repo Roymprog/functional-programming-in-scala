@@ -86,6 +86,8 @@ object InitialParsers extends Parsers[InitialParser] {
   override def errorMessage(p: ParseError): String = p.stack.head._2
 
   override def errorLocation(p: ParseError): Location = p.stack.head._1
+
+  override def succeed[A](a: A): InitialParser[A] = InitialParser(s => Right((s,a)))
 }
 
 // How do I know if a parser is committed on failure or not?
